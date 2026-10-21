@@ -65,6 +65,53 @@ messages[], message_tag, target}`, `deleted`, stats counters.
 - Button (`keyboard[]`) shape: the arrays were empty in this capture.
 - How ManyChat handles keyword collisions between rules.
 
+## Second capture: comment trigger and real values (2026-10-20)
+
+Driven over CDP (a small Node script, because REA's `capture_browser_scenario`
+failed on this host) with full request/response bodies. A throwaway draft
+automation was created, given a comment trigger and a message with two
+buttons, never published, then deleted (`cms/delete`, goes to the trash).
+Existing automations were only read.
+
+**Observed values** (resolve the unknowns above):
+
+- Flow: `type: "default"`, `status: "active"`, `origin: 1`; list rows carry
+  `is_live` and `channels_usage{instagram, facebook, ...}`.
+- Instagram content: `type: "instagram"`, `caption: "Enviar Mensagem"`;
+  message `type: "text"`, `content{text}` (editor counter: 1000 chars).
+- Keyword rule: `condition: "contains"`, `status: "live" | "draft"`,
+  `channel: "instagram"`, keywords stored as typed (`"Link"`), `sort` = unix
+  time of creation, `content_holder: "keyword<ts>_<6 digits>"`.
+- Buttons (`keyboard[]`):
+  `{_oid, type: "content", caption, _content_oid, emoji, image, is_fallback, is_smart_link}`
+  and `{_oid, type: "url", caption, url, target, webview_size, do_not_track, is_smart_link}`.
+  Title counter: 20 characters.
+- Trigger filter catalogue (`cms/getAvailableFilters`): `widget:instagram:15`
+  "Post or Reel Comments" and `keyword:instagram` "DM Keyword".
+
+**Comment trigger** (a "growth tool" widget, not a keyword rule):
+
+| # | Request | Body |
+|---|---|---|
+| 1 | `POST growth-tools/createWidget` | `{widget_type: "feed_comment_trigger", channel: "instagram", name: "", ns}` → widget `{widget_id, type: 15, status: "initial", name: "Post or Reel Comments #3", data{feed_comment_settings{...}}}` |
+| 2 | `POST flow/patchDraft` | root content gets `private_reply: "private_reply"` |
+| 3 | `POST growth-tools/setWidget` | whole widget → `status: "draft"` |
+
+`data.feed_comment_settings`: `post_covered_area` (`"all_posts"`,
+`"next_post"`, or a specific post with `post_id`), `comment_contains`
+(`"specific_words"` or any comment), `include_keywords_array[]`,
+`exclude_keywords_array[]` (editor: "keywords ignore case"),
+`track_root_comment_only` boolean. `data.feed_comment_welcome.public_reply_messages[]`
+("multiple random replies"; the editor pre-fills three). Widget statuses seen:
+`initial`, `draft`, `active` (live flows).
+
+Per content, the editor's "Send" selector is `private_reply: "private_reply"`
+("reply privately") or `null` ("inside the messaging window").
+
+The quick-automation path (`easyBuilder/getConfig`, `easyBuilder/get`) wraps
+the same widget in a template with `use_cases` toggles (`follow_up`,
+`collect_email`, `ask_for_follow`, `publicly_reply_to_comment`, ...).
+
 ## Decisions for this project
 
 - Enums: `condition` = `is | contains | starts_with`; `channel` =
@@ -77,3 +124,60 @@ messages[], message_tag, target}`, `deleted`, stats counters.
   root/targets, blank texts or empty contents (HTTP 422).
 - The same keyword under the same condition on the same channel is rejected
   (HTTP 409), and keywords are stored lowercased.
+
+## Third capture: editor UI (2026-10-20)
+
+For the front-end (`apps/web`). Read-only: REA `list_browser_targets`
+(`ev_e9b195079fb1fe1c2de2dafcfc7bf7f06a55e8f383b3b34bd412bb9bd69d1ee1`) and a
+passive `inspect_web_page` of the automations list with accessibility text
+(`ev_1686b232691facab3f41913b3f1e4aa4b8cc5e40d10490570fb091d1873c5173`; DOM,
+scripts and storage were policy-filtered, the accessibility tree was
+complete), then CDP screenshots and computed styles of a published
+automation opened in view mode, plus the screenshots of the second capture.
+Nothing was edited.
+
+**Observed:**
+
+- List (`/cms?path=/`, "Minhas automações"): "Nova Automação", search
+  ("Pesquisar todas as automações"), filters "Qualquer gatilho" and
+  "Estados variados do gatilho", "Nova Pasta", "Lixeira", sort by "Nome" /
+  "Modificado", grid view toggle, one card per automation with a LIVE badge,
+  name, modified time, trigger line ("A mensagem contém nova") and an
+  on/off switch for the trigger. "Nova Automação" opens a templates modal with
+  "Começar Do Zero".
+- Editor top bar: "Automações > name ✎", DRAFT/LIVE badge, "Salvando..." /
+  "Salvo", undo/redo, "Visualização", "Publicar", "Mais ações" (Duplicar,
+  Apagar, Reverter para publicado...). A live flow opens read-only with the
+  banner "Você está visualizando uma versão publicada · Editar" and an
+  "Editar Automação" button.
+- Canvas: the start node "Quando..." lists the triggers (green boxes, e.g.
+  "O usuário envia uma mensagem / A mensagem contém nova"), "+ Novo Gatilho",
+  and "Então" linked to the first step. Steps are "Instagram · Enviar
+  Mensagem" cards with text bubbles, buttons (a content button has its own
+  outgoing link, a URL button a link icon) and "Próximo Passo". Floating blue
+  "+", zoom buttons, hint "Toque no passo para editar". New steps are named
+  "Enviar Mensagem #1", "#2"...
+- The canvas is drawn on a single `<canvas>` element: the nodes have no DOM.
+- Clicking a step opens a left sidebar (pink header for messages, green for
+  triggers): "Enviar" (private reply / inside the messaging window), text
+  with a counter, "+ Botão Adicionar", content blocks (Texto, Imagem, PDF...).
+  "Editar Botão": title with a 20-character counter, "Quando este botão é
+  pressionado" (Instagram, Abrir Site, Executar Ações, Condição, ...),
+  "Excluir Botão", "Concluído".
+- "+ Novo Gatilho" opens "Iniciar automação quando..." (Instagram: comments
+  on post or reel, story reply, message, share to story, ads...). The
+  comment trigger is a three-step wizard ("Etapa 1 de 3": which post, which
+  words, public reply), then a summary with "Editar".
+- Computed styles: font InterVariable/Inter 14px, text `#292929` on
+  `#f5f5f5`, buttons with a 6px radius and `#d6d6d6` border, LIVE badge
+  `#d52b0d`, published-version banner `#fff2e0`.
+
+**Decisions** (front-end):
+
+- The canvas uses React Flow (DOM nodes), styled after the screenshots.
+- Only what the API supports is selectable; other triggers are shown as
+  "Em breve". No templates modal: "Nova Automação" creates "Sem Título" and
+  opens it, which is what "Começar Do Zero" does.
+- The API gained the routes the UI needs: rename and delete a flow, replace
+  and delete triggers, and triggers in the list response.
+- No metrics, folders, trash, trigger on/off switch, preview or revert.

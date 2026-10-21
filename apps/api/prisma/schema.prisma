@@ -1,0 +1,124 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum FlowStatus {
+  draft
+  live
+}
+
+enum Channel {
+  instagram
+  facebook
+  whatsapp
+  telegram
+}
+
+// An automation. `ns` is the public identifier (ManyChat format:
+// content<YYYYMMDDHHmmss>_<6 digits>).
+model Flow {
+  id              Int              @id @default(autoincrement())
+  ns              String           @unique
+  name            String
+  path            String           @default("/")
+  status          FlowStatus       @default(draft)
+  // Unpublished editor state: { rootContent, contents[], coordinates }. Null
+  // means the published version is current.
+  draft           Json?
+  coordinates     Json?
+  rootContentId   Int?
+  publishedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  contents        FlowContent[]
+  keywordRules    KeywordRule[]
+  commentTriggers CommentTrigger[]
+
+  @@index([path])
+}
+
+// A published node of a flow. `id` is the server-assigned content_id; it stays
+// stable across republishes because contents are matched by `oid`.
+model FlowContent {
+  id        Int      @id @default(autoincrement())
+  flowId    Int
+  flow      Flow     @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  oid       String
+  type      String
+  caption   String
+  data      Json
+  targetOid String?
+  deleted   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([flowId, oid])
+}
+
+// A keyword trigger. It lives outside the flow graph and points to a flow.
+model KeywordRule {
+  id           Int      @id @default(autoincrement())
+  flowId       Int
+  flow         Flow     @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  name         String
+  channel      Channel
+  sort         Int      @default(0)
+  // [{ condition: "is" | "contains" | "starts_with", keywords: string[] }]
+  keywordRules Json
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([channel])
+}
+
+// An Instagram comment trigger: a comment on a post or reel starts the flow
+// with a private reply (ManyChat's feed_comment_trigger widget).
+model CommentTrigger {
+  id               Int      @id @default(autoincrement())
+  flowId           Int
+  flow             Flow     @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  name             String
+  sort             Int      @default(0)
+  // Instagram media ids. Empty means any post or reel.
+  mediaIds         String[]
+  // Lowercased; matched as "comment contains". Empty means any comment.
+  includeKeywords  String[]
+  // Lowercased; a comment containing any of these never matches.
+  excludeKeywords  String[]
+  // Ignore replies to other comments (ManyChat's track_root_comment_only).
+  rootCommentsOnly Boolean  @default(false)
+  // Public answers under the comment; one is picked at random.
+  publicReplies    String[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// Someone who talked to the account on a channel. `externalId` is the
+// channel's user id (the Instagram-scoped id, IGSID).
+model Contact {
+  id                Int      @id @default(autoincrement())
+  channel           Channel
+  externalId        String
+  username          String?
+  lastInteractionAt DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([channel, externalId])
+}
+
+// Webhook events already handled. Meta retries deliveries for up to 36 hours,
+// so each message id / comment id is processed once.
+model InboundEvent {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  createdAt DateTime @default(now())
+}
